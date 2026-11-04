@@ -1,40 +1,40 @@
 # Privacy and permissions
 
-Foldman has no accounts, analytics, ads or servers of its own. Everything it knows stays on your phone, apart from the requests to Apple described below.
+Ferric Player has no accounts, analytics, ads or servers of its own. Everything it knows stays on your phone, apart from the requests to Apple described below.
 
 ## Permissions
 
-| Permission | Why Foldman asks |
+| Permission | Why Ferric Player asks |
 | --- | --- |
-| **Notification access** (Settings → Notification access) | Android only lets apps with notification access see other apps' *media sessions*: what YT Music or Apple Music is playing, and their play/pause/skip controls. Foldman's listener does nothing with notifications themselves; it never reads, stores or dismisses them. Only needed for the YT Music source, and for Apple Music without MusicKit. |
+| **Notification access** (Settings → Notification access) | Android only lets apps with notification access see other apps' *media sessions*: what YT Music or Apple Music is playing, and their play/pause/skip controls. Ferric Player's listener does nothing with notifications themselves; it never reads, stores or dismisses them. Only needed for the YT Music source, and for Apple Music without MusicKit. |
 | **Folder access** (the system folder picker) | Read access to the one music folder you choose, and nothing else on the phone. |
 | **Notifications** | Shows the media notification while local music plays, with play/pause and skip on the lock screen. |
-| **Foreground service (media playback)** | Keeps local music playing when Foldman is in the background. |
+| **Foreground service (media playback)** | Keeps local music playing when Ferric Player is in the background. |
 | **Internet** | Downloads album art for streaming sources, and talks to Apple (below). |
 | Wake lock, network state | Requested by Apple's MusicKit player, for streaming. |
 
 ## What's stored on the phone
 
-Foldman keeps a few settings in its private app storage:
+Ferric Player keeps a few settings in its private app storage:
 - the source in the deck;
 - the music folder you picked;
 - the CLICK and HAPTIC switch positions;
 - your Apple Music **user token**, after you sign in, and a developer token if you pasted one in.
 
-None of it leaves the phone. Foldman opts out of Android's cloud backup and of device-to-device transfer, so your Apple Music token isn't copied into a backup or onto a new phone; on a new phone you sign in again. Uninstalling Foldman deletes it all.
+None of it leaves the phone. Ferric Player opts out of Android's cloud backup and of device-to-device transfer, so your Apple Music token isn't copied into a backup or onto a new phone; on a new phone you sign in again. Uninstalling Ferric Player deletes it all.
 
-> Versions 0.1.0 and 0.1.1 allowed Android's backup, so their settings, including the Apple Music user token, could be included in your phone's backup. 0.1.2 and later don't. Signing out in Foldman deletes the token from the phone, but not from a backup that was already made. Android replaces backups over time, and you can delete an existing one in your phone's Google backup settings.
+> Versions 0.1.0 and 0.1.1 allowed Android's backup, so their settings, including the Apple Music user token, could be included in your phone's backup. 0.1.2 and later don't. Signing out in Ferric Player deletes the token from the phone, but not from a backup that was already made. Android replaces backups over time, and you can delete an existing one in your phone's Google backup settings.
 
 ## What goes over the network
 
 - **Apple** (`api.music.apple.com` and Apple's streaming services), only when you use Apple Music through MusicKit:
-  - Foldman fetches your library playlists and their songs with your user token.
+  - Ferric Player fetches your library playlists and their songs with your user token.
   - Apple's MusicKit player streams the songs and, like any Apple Music player, reports what you played back to Apple.
   - Apple's handling of that data is covered by [Apple's privacy policy](https://www.apple.com/legal/privacy/).
-- **Album art URLs** that YT Music, Apple Music or Apple's API hand to Foldman are downloaded to draw the cassette label.
+- **Album art URLs** that YT Music, Apple Music or Apple's API hand to Ferric Player are downloaded to draw the cassette label.
 
 Local music never leaves the phone.
 
 ## Signing out
 
-In Foldman, go to Apple Music → **Sign out** to forget your Apple Music user token. Turning off Foldman's notification access in Android settings stops it seeing other apps' playback.
+In Ferric Player, go to Apple Music → **Sign out** to forget your Apple Music user token. Turning off Ferric Player's notification access in Android settings stops it seeing other apps' playback.

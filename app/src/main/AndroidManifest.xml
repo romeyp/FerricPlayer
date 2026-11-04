@@ -7,10 +7,17 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- The streaming apps Foldman can drive through their media sessions. -->
+    <!-- The streaming apps Foldman can drive through their media sessions, the Poweramp apps,
+         and any app that answers the system's audio effect panel action, which is how the
+         control strip's EQ chooser finds the equalizer apps on the phone. -->
     <queries>
         <package android:name="com.google.android.apps.youtube.music" />
         <package android:name="com.apple.android.music" />
+        <package android:name="com.maxmpz.audioplayer.eq" />
+        <package android:name="com.maxmpz.audioplayer" />
+        <intent>
+            <action android:name="android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL" />
+        </intent>
     </queries>
 
     <!-- allowBackup / dataExtractionRules: the settings include the Apple Music user token, so

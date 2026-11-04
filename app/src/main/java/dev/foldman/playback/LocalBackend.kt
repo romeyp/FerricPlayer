@@ -15,6 +15,7 @@ import dev.foldman.deck.BackendState
 import dev.foldman.deck.DeckBackend
 import dev.foldman.deck.LocalTrack
 import dev.foldman.deck.NowPlaying
+import dev.foldman.deck.RepeatMode
 import dev.foldman.deck.SourceStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -144,6 +145,17 @@ class LocalBackend(private val context: Context) : DeckBackend {
             trackCount = c.mediaItemCount,
             hasNext = c.hasNextMediaItem(),
             hasPrevious = c.hasPreviousMediaItem(),
+            // Our own player always takes shuffle and repeat commands.
+            shuffleOn = c.shuffleModeEnabled,
+            repeatMode = when (c.repeatMode) {
+                Player.REPEAT_MODE_ALL -> RepeatMode.ALL
+                Player.REPEAT_MODE_ONE -> RepeatMode.ONE
+                else -> RepeatMode.NONE
+            },
+            canShuffle = true,
+            canRepeat = true,
+            // Our own player always takes a seek to any position in the file.
+            canSeek = true,
         )
     }
 
@@ -179,6 +191,23 @@ class LocalBackend(private val context: Context) : DeckBackend {
     override fun playQueueItem(id: Long) = playTrack(id.toInt())
     override fun skipToNext() { controller?.takeIf { it.hasNextMediaItem() }?.seekToNextMediaItem() }
     override fun skipToPrevious() { controller?.takeIf { it.hasPreviousMediaItem() }?.seekToPreviousMediaItem() }
+
+    override fun setShuffle(on: Boolean) {
+        // Show the new setting at once; the player's next event report reconciles it.
+        _state.value = _state.value.copy(shuffleOn = on)
+        withController { it.shuffleModeEnabled = on }
+    }
+
+    override fun setRepeatMode(mode: RepeatMode) {
+        _state.value = _state.value.copy(repeatMode = mode)
+        withController {
+            it.repeatMode = when (mode) {
+                RepeatMode.NONE -> Player.REPEAT_MODE_OFF
+                RepeatMode.ALL -> Player.REPEAT_MODE_ALL
+                RepeatMode.ONE -> Player.REPEAT_MODE_ONE
+            }
+        }
+    }
 
     override fun release() {
         future?.let(MediaController::releaseFuture)

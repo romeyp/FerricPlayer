@@ -204,6 +204,8 @@ class AppleKitBackend(private val context: Context) : DeckBackend {
                 )
             },
             currentQueueId = s.getLong(P.CURRENT_ID, -1L),
+            // The in-app player takes seeks through its service while it is bound.
+            canSeek = alive,
         )
     }
 

@@ -19,11 +19,11 @@ val signingProps = Properties().apply {
 }
 
 // The app version; versionCode must go up by one with every release.
-val appVersionName = "0.1.2"
-val appVersionCode = 3
+val appVersionName = "1.8.0"
+val appVersionCode = 21
 
 base {
-    archivesName = "Foldman-$appVersionName"
+    archivesName = "FerricPlayer-$appVersionName"
 }
 
 android {
@@ -31,7 +31,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "dev.foldman"
+        applicationId = "dev.jerome.trackman"
         minSdk = 30
         targetSdk = 36
         versionCode = appVersionCode
@@ -88,6 +88,9 @@ dependencies {
 
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-session:1.11.1")
+    // The framework SDK hides session shuffle and repeat from apps; the compat session API is
+    // the public route to reading and setting them on another app's media session.
+    implementation("androidx.media:media:1.7.0")
     implementation("androidx.window:window:1.5.1")
     implementation("androidx.palette:palette-ktx:1.0.0")
 

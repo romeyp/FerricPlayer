@@ -17,6 +17,12 @@ enum class Source(val label: String, val packageName: String?) {
  */
 enum class Transport { STOPPED, PLAYING, PAUSED, REWINDING, FAST_FORWARDING }
 
+/** The deck's repeat setting, mapped onto each backend's own constants. */
+enum class RepeatMode { NONE, ALL, ONE }
+
+/** The deck's orientation setting: follow the phone, or hold the deck portrait or landscape. */
+enum class OrientationMode { AUTO, PORTRAIT, LANDSCAPE }
+
 sealed interface SourceStatus {
     data object Ready : SourceStatus
     data object NeedsFolder : SourceStatus
@@ -82,6 +88,15 @@ data class BackendState(
     val hasPrevious: Boolean = false,
     val queue: List<QueueEntry> = emptyList(),
     val currentQueueId: Long = -1,
+    /** Shuffle and repeat, read from the source itself; the can* flags say whether the source
+     * lets us set them, so the deck never lights a toggle it cannot honour. */
+    val shuffleOn: Boolean = false,
+    val repeatMode: RepeatMode = RepeatMode.NONE,
+    val canShuffle: Boolean = false,
+    val canRepeat: Boolean = false,
+    /** Whether this source accepts a seek to an arbitrary position; the deck only turns its
+     * progress lines into scrubbers for sources that say yes. */
+    val canSeek: Boolean = false,
 )
 
 /** One tape source: the local Media3 player, or another app's media session. */
@@ -94,6 +109,10 @@ interface DeckBackend {
     fun skipToNext()
     fun skipToPrevious()
     fun playQueueItem(id: Long)
+    /** Shuffle and repeat commands. Backends that cannot honour them leave these as no-ops
+     * and keep canShuffle / canRepeat false in their state. */
+    fun setShuffle(on: Boolean) {}
+    fun setRepeatMode(mode: RepeatMode) {}
     /** Re-checks permissions and sessions, e.g. when the app comes back to the foreground. */
     fun refresh() {}
     fun release()

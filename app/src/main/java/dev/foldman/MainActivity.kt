@@ -2,6 +2,7 @@ package dev.foldman
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -22,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowLayoutInfo
 import dev.foldman.deck.DeckViewModel
+import dev.foldman.deck.OrientationMode
 import dev.foldman.deck.Source
 import dev.foldman.ui.FoldmanScreen
 
@@ -29,9 +31,26 @@ class MainActivity : ComponentActivity() {
     private val vm by lazy { ViewModelProvider(this)[DeckViewModel::class.java] }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // The deck's orientation hold, applied before the first frame so a held deck never
+        // flashes the other way at startup. AUTO leaves the activity unspecified, which is
+        // exactly how the deck behaved before the setting existed.
+        requestedOrientation = orientationConstant(
+            runCatching {
+                OrientationMode.valueOf(
+                    getSharedPreferences("foldman", MODE_PRIVATE).getString("orientation_mode", null) ?: "",
+                )
+            }.getOrDefault(OrientationMode.AUTO),
+        )
+        // Edge to edge: the deck draws its own surface behind the system bars, which the
+        // theme leaves transparent. Called after super so theme application cannot undo it.
+        enableEdgeToEdge()
         setContent {
+            val deckUi by vm.ui.collectAsStateWithLifecycle()
+            // Re-applied whenever the setting changes in the deck's settings sheet.
+            LaunchedEffect(deckUi.orientationMode) {
+                requestedOrientation = orientationConstant(deckUi.orientationMode)
+            }
             val windowLayout by remember { WindowInfoTracker.getOrCreate(this).windowLayoutInfo(this) }
                 .collectAsStateWithLifecycle<WindowLayoutInfo?>(initialValue = null)
             val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -65,6 +84,12 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Notification access may have just been granted in Settings, or the streaming app started.
         vm.refresh()
+    }
+
+    private fun orientationConstant(mode: OrientationMode): Int = when (mode) {
+        OrientationMode.AUTO -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        OrientationMode.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        OrientationMode.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
     }
 
     private fun openStoreListing(source: Source) {

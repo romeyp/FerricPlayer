@@ -13,12 +13,16 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.support.v4.media.session.MediaControllerCompat
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.view.KeyEvent
 import androidx.core.app.NotificationManagerCompat
 import dev.foldman.deck.BackendState
 import dev.foldman.deck.DeckBackend
 import dev.foldman.deck.NowPlaying
 import dev.foldman.deck.QueueEntry
+import dev.foldman.deck.RepeatMode
 import dev.foldman.deck.Source
 import dev.foldman.deck.SourceStatus
 import dev.foldman.playback.Artwork
@@ -47,6 +51,12 @@ class RemoteBackend(private val context: Context, source: Source) : DeckBackend 
     override val state: StateFlow<BackendState> = _state.asStateFlow()
 
     private var controller: MediaController? = null
+    /**
+     * The same session seen through the compat API, which is the public route to its shuffle
+     * and repeat modes: the framework controller's SDK surface hides both. Kept beside the
+     * framework controller and used for nothing else.
+     */
+    private var controllerCompat: MediaControllerCompat? = null
     private var watchingSessions = false
     private var artworkKey: String? = null
     private var artwork: Bitmap? = null
@@ -62,6 +72,13 @@ class RemoteBackend(private val context: Context, source: Source) : DeckBackend 
             unbind()
             publish()
         }
+    }
+
+    /** Shuffle and repeat live on the compat side of the session; its mode changes republish. */
+    private val compatCallback = object : MediaControllerCompat.Callback() {
+        override fun onPlaybackStateChanged(state: PlaybackStateCompat?) = publish()
+        override fun onShuffleModeChanged(shuffleMode: Int) = publish()
+        override fun onRepeatModeChanged(repeatMode: Int) = publish()
     }
 
     val hasAccess: Boolean
@@ -95,12 +112,20 @@ class RemoteBackend(private val context: Context, source: Source) : DeckBackend 
         }
         unbind()
         controller = match?.also { it.registerCallback(callback, handler) }
+        controllerCompat = match?.let { c ->
+            runCatching {
+                MediaControllerCompat(context, MediaSessionCompat.Token.fromToken(c.sessionToken))
+                    .also { it.registerCallback(compatCallback, handler) }
+            }.getOrNull()
+        }
         publish()
     }
 
     private fun unbind() {
         controller?.unregisterCallback(callback)
         controller = null
+        controllerCompat?.unregisterCallback(compatCallback)
+        controllerCompat = null
     }
 
     private fun publish() {
@@ -146,8 +171,30 @@ class RemoteBackend(private val context: Context, source: Source) : DeckBackend 
                 )
             },
             currentQueueId = pb?.activeQueueItemId ?: -1,
+            // Shuffle and repeat come from the compat view of the same session. Until it
+            // reports them, both read as off and unsettable rather than guessed.
+            shuffleOn = compatShuffleMode() == PlaybackStateCompat.SHUFFLE_MODE_ALL ||
+                compatShuffleMode() == PlaybackStateCompat.SHUFFLE_MODE_GROUP,
+            repeatMode = when (compatRepeatMode()) {
+                PlaybackStateCompat.REPEAT_MODE_ALL, PlaybackStateCompat.REPEAT_MODE_GROUP -> RepeatMode.ALL
+                PlaybackStateCompat.REPEAT_MODE_ONE -> RepeatMode.ONE
+                else -> RepeatMode.NONE
+            },
+            canShuffle = compatActions() and PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE != 0L,
+            canRepeat = compatActions() and PlaybackStateCompat.ACTION_SET_REPEAT_MODE != 0L,
+            // Seek is honoured only when the session advertises it in its current actions;
+            // a session that never offers ACTION_SEEK_TO keeps the deck's bars display only.
+            canSeek = compatActions() and PlaybackStateCompat.ACTION_SEEK_TO != 0L,
         )
     }
+
+    private fun compatShuffleMode(): Int =
+        controllerCompat?.let { runCatching { it.shuffleMode }.getOrNull() } ?: PlaybackStateCompat.SHUFFLE_MODE_INVALID
+
+    private fun compatRepeatMode(): Int =
+        controllerCompat?.let { runCatching { it.repeatMode }.getOrNull() } ?: PlaybackStateCompat.REPEAT_MODE_INVALID
+
+    private fun compatActions(): Long = controllerCompat?.playbackState?.actions ?: 0L
 
     private fun updateArtwork(meta: MediaMetadata?, key: String) {
         if (key == artworkKey && (artwork != null || artworkJob?.isActive == true)) return
@@ -195,10 +242,37 @@ class RemoteBackend(private val context: Context, source: Source) : DeckBackend 
     }
 
     override fun pause() { controller?.transportControls?.pause() }
-    override fun seekTo(positionMs: Long) { controller?.transportControls?.seekTo(positionMs) }
+    override fun seekTo(positionMs: Long) {
+        // Seeks go through the compat view of the session, the same side that reports
+        // whether seeking is offered at all; the framework controller is the fallback.
+        val compat = controllerCompat
+        if (compat != null) compat.transportControls.seekTo(positionMs)
+        else controller?.transportControls?.seekTo(positionMs)
+    }
     override fun playQueueItem(id: Long) { controller?.transportControls?.skipToQueueItem(id) }
     override fun skipToNext() { controller?.transportControls?.skipToNext() }
     override fun skipToPrevious() { controller?.transportControls?.skipToPrevious() }
+
+    override fun setShuffle(on: Boolean) {
+        val compat = controllerCompat ?: return
+        compat.transportControls.setShuffleMode(
+            if (on) PlaybackStateCompat.SHUFFLE_MODE_ALL else PlaybackStateCompat.SHUFFLE_MODE_NONE,
+        )
+        // Show the new setting at once; the session's next state report reconciles it.
+        _state.value = _state.value.copy(shuffleOn = on)
+    }
+
+    override fun setRepeatMode(mode: RepeatMode) {
+        val compat = controllerCompat ?: return
+        compat.transportControls.setRepeatMode(
+            when (mode) {
+                RepeatMode.NONE -> PlaybackStateCompat.REPEAT_MODE_NONE
+                RepeatMode.ALL -> PlaybackStateCompat.REPEAT_MODE_ALL
+                RepeatMode.ONE -> PlaybackStateCompat.REPEAT_MODE_ONE
+            },
+        )
+        _state.value = _state.value.copy(repeatMode = mode)
+    }
 
     /** Opens the streaming app, beside Foldman when the screen is unfolded. */
     fun openApp() {

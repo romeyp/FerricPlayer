@@ -286,6 +286,87 @@ fun VolumeSlider(volume: Float, onVolume: (Float) -> Unit, modifier: Modifier = 
     }
 }
 
+/**
+ * The horizontal volume slider for the portrait deck's top strip: a long ticked track, the level
+ * filled in orange, and a big metal knob with an orange position line, so the level reads at a
+ * glance. Same state and wiring as [VolumeSlider]; the vertical one stays for the other postures.
+ */
+@Composable
+fun VolumeSliderHorizontal(volume: Float, onVolume: (Float) -> Unit, modifier: Modifier = Modifier) {
+    val current by rememberUpdatedState(volume)
+    val set by rememberUpdatedState(onVolume)
+    val measurer = rememberTextMeasurer()
+    Canvas(
+        modifier
+            .semantics {
+                contentDescription = "Volume"
+                progressBarRangeInfo = ProgressBarRangeInfo(current, 0f..1f)
+                setProgress { set(it.coerceIn(0f, 1f)); true }
+            }
+            .pointerInput(Unit) {
+                detectDragGestures { change, drag ->
+                    change.consume()
+                    set((current + drag.x / (size.width * 0.8f)).coerceIn(0f, 1f))
+                }
+            },
+    ) {
+        val ink = Color(0xFFB9BCC2)
+        val small = TextStyle(fontSize = 7.sp, fontWeight = FontWeight.Bold, color = ink)
+        val cy = size.height * 0.42f
+        // Speaker glyph at the left end.
+        val gy = cy
+        val body = Path().apply {
+            moveTo(2.dp.toPx(), gy - 3.dp.toPx())
+            lineTo(7.dp.toPx(), gy - 3.dp.toPx())
+            lineTo(13.dp.toPx(), gy - 8.dp.toPx())
+            lineTo(13.dp.toPx(), gy + 8.dp.toPx())
+            lineTo(7.dp.toPx(), gy + 3.dp.toPx())
+            lineTo(2.dp.toPx(), gy + 3.dp.toPx())
+            close()
+        }
+        drawPath(body, ink)
+        for (i in 1..2) {
+            val r = (5 + i * 4).dp.toPx()
+            drawArc(
+                ink, startAngle = -50f, sweepAngle = 100f, useCenter = false,
+                topLeft = Offset(13.dp.toPx() - r * 0.4f, gy - r), size = Size(r * 1.4f, r * 2f),
+                style = Stroke(1.6f),
+            )
+        }
+        val left = 30.dp.toPx()
+        val right = size.width - 8.dp.toPx()
+        val trackH = 6.dp.toPx()
+        // Tick scale above the track, longer at 0, 5 and 10.
+        for (i in 0..20) {
+            val x = left + (right - left) * i / 20f
+            val len = if (i % 5 == 0) 7.dp.toPx() else 4.dp.toPx()
+            drawLine(ink.copy(alpha = 0.75f), Offset(x, cy - 9.dp.toPx() - len), Offset(x, cy - 9.dp.toPx()), 1.2f)
+        }
+        // The slot, its orange fill up to the knob, and the end numerals.
+        drawRoundRect(Color.White.copy(alpha = 0.35f), Offset(left, cy - trackH / 2f + 1.5f), Size(right - left, trackH), CornerRadius(3f))
+        drawRoundRect(Color(0xFF0A0A0B), Offset(left, cy - trackH / 2f), Size(right - left, trackH), CornerRadius(3f))
+        val kx = left + (right - left) * current
+        drawRoundRect(DeckColors.Accent, Offset(left, cy - trackH / 2f), Size(kx - left, trackH), CornerRadius(3f))
+        val zero = measurer.measure("0", small)
+        drawText(zero, topLeft = Offset(left - zero.size.width / 2f, cy + 11.dp.toPx()))
+        val ten = measurer.measure("10", small)
+        drawText(ten, topLeft = Offset(right - ten.size.width / 2f, cy + 11.dp.toPx()))
+        // The knob: big metal disc, orange position line on top.
+        val kr = 13.dp.toPx()
+        drawCircle(Color.Black.copy(alpha = 0.45f), kr, Offset(kx, cy + 2f))
+        drawCircle(
+            Brush.radialGradient(
+                listOf(Color(0xFFF2F3F5), Color(0xFFA6A9AE), Color(0xFF7E8187)),
+                center = Offset(kx - kr * 0.35f, cy - kr * 0.35f), radius = kr * 1.5f,
+            ),
+            kr, Offset(kx, cy),
+        )
+        drawCircle(Color.Black.copy(alpha = 0.35f), kr, Offset(kx, cy), style = Stroke(1.2f))
+        drawLine(DeckColors.Accent, Offset(kx, cy - kr * 0.88f), Offset(kx, cy - kr * 0.3f), 3.dp.toPx())
+        drawCircle(DeckColors.AccentDeep, 2.dp.toPx(), Offset(kx, cy))
+    }
+}
+
 /** The orange hotline-style button on top of the case; here it opens the tape shelf. */
 @Composable
 fun HotlineButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
