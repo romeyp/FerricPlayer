@@ -1,7 +1,7 @@
 # Ferric Player: User Guide and Known Issues
 
 **Ferric Player, by Protech Prime Consulting**
-Version covered: 1.8.0
+Version covered: 1.9.7
 
 Ferric Player is a skeuomorphic remote control for the music apps already on your phone. It puts YouTube Music and Apple Music behind one cassette deck face, and on foldables and tablets it becomes a full component stereo stack with two cassette wells, one for each library. It also plays local audio files from a folder you choose.
 
@@ -50,7 +50,7 @@ Many manufacturers kill background services aggressively, and Ferric's session w
 ## What the decks do
 
 - **Phone, portrait:** a cassette deck with meters, a full cassette, and a Now Playing panel. Expand the cassette for a full screen tape.
-- **Phone, landscape:** a slim personal player in the style of the great 90s portables, with the full control rail.
+- **Phone, landscape:** a full personal player in the style of the great 90s portables. A solid door with a smoked window fills most of the body, and behind the glass sits a cassette larger than the window itself, so what you see is the label band, the handwritten title, and both reels turning, the way a tape actually looks inside a real machine. The five piano keys run along the bottom edge and travel when pressed, with a light haptic tick if haptics are on in Settings. Hold FF or REW down to wind, where the playing app's session offers seeking. The control pod beside the door carries EQ, shuffle, and repeat, plus SOURCE, SETTINGS, and SLEEP, and the track readout and seek line ride in a thin strip along the bottom edge. The body runs full screen, with the phone's status and navigation bars hidden, the same as the other full screen views. There is no expand button in landscape: the body already is the full door view. The portrait deck and the stack keep their own expand.
 - **Foldable, cover screen:** the portrait deck.
 - **Foldable, half open (tabletop):** the deck rides above the hinge.
 - **Foldable, unfolded, and tablets:** the component stack. A receiver, a dual cassette deck, a CD player, and an amplifier.

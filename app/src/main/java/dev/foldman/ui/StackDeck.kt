@@ -151,9 +151,14 @@ fun StackDeck(
                 .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-            ReceiverPlate(ui, vm, onTapes, onSettings, Modifier.fillMaxWidth().weight(14f))
-            CassettePlate(ui, anim, vm, onExpand, Modifier.fillMaxWidth().weight(36f))
-            CdPlate(ui, vm, Modifier.fillMaxWidth().weight(18f))
+            // Plate shares of the stack's height. The cassette plate's share sets the well
+            // faces' size (height binds them), so growing the tapes means feeding this
+            // plate: 1.5.1 set 14 / 36 / 18 / 32 for about 207 dp faces, and 1.9.7 feeds
+            // the cassette plate another 1.75 points from the receiver and the CD player
+            // for about 228 dp, another 10 percent of readable label.
+            ReceiverPlate(ui, vm, onTapes, onSettings, Modifier.fillMaxWidth().weight(13.25f))
+            CassettePlate(ui, anim, vm, onExpand, Modifier.fillMaxWidth().weight(37.75f))
+            CdPlate(ui, vm, Modifier.fillMaxWidth().weight(17f))
             AmplifierPlate(ui, levels, vm, Modifier.fillMaxWidth().weight(32f))
         }
     }

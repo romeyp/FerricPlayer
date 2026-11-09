@@ -638,6 +638,55 @@ fun EqualizerButton(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * The same EQ shortcut as [EqualizerButton] (tap opens the remembered equalizer or
+ * the chooser, long press always opens the chooser), drawn as the landscape body's
+ * rectangular pod key so it matches the pod rows around it.
+ */
+@Composable
+fun EqualizerPodKey(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var eqChooserOpen by remember { mutableStateOf(false) }
+    val openEqChooser: () -> Unit = {
+        if (eqCandidates(context).isEmpty()) {
+            Toast.makeText(context, "No equalizer app found", Toast.LENGTH_SHORT).show()
+        } else {
+            eqChooserOpen = true
+        }
+    }
+    val onEqTap: () -> Unit = {
+        val target = loadEqTarget(context)
+        when {
+            target == null -> openEqChooser()
+            launchEqComponent(context, target) -> Unit
+            else -> {
+                clearEqTarget(context)
+                openEqChooser()
+            }
+        }
+    }
+    PodRectKey(
+        description = "Equalizer",
+        name = "EQUALIZER",
+        glyph = PodGlyph.EQ,
+        onPress = onEqTap,
+        modifier = modifier,
+        onLongPress = openEqChooser,
+        longPressHint = "Long press to choose a different equalizer app",
+    )
+    if (eqChooserOpen) {
+        EqualizerChooser(
+            candidates = remember { eqCandidates(context) },
+            onPick = { candidate ->
+                storeEqTarget(context, candidate.component)
+                eqChooserOpen = false
+                launchEqComponent(context, candidate.component)
+            },
+            onDismiss = { eqChooserOpen = false },
+        )
+    }
+}
+
 /** A candidate equalizer app for the chooser: where it lives, what it calls itself, its icon. */
 private class EqCandidate(val component: ComponentName, val label: String, val icon: ImageBitmap?)
 

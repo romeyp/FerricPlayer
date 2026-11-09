@@ -20,11 +20,11 @@ Folded, it is a cassette deck with honest tape physics, twin VU meters, and a la
 
 ![Portrait deck](media/03-portrait-deck.png)
 
-Turned sideways, it is a slim personal player in the style of the great 90s portables.
+Turned sideways, it becomes a full personal player in the style of the great 90s portables: a solid door with a smoked window, and behind the glass a cassette larger than the window itself, so the label band, the handwritten title, and both reels fill the view. It runs full screen, keys along the bottom edge, and holding FF or REW winds the tape.
 
 ![Landscape deck](media/04-landscape-deck.png)
 
-Expanded, the tape takes the whole screen.
+On the portrait deck, expand takes the tape to the whole screen. The landscape body has no expand; the body itself is the full view.
 
 ![Expanded tape](media/05-expanded-tape.png)
 
@@ -35,6 +35,7 @@ Expanded, the tape takes the whole screen.
 ## Features
 
 - One deck for YouTube Music, Apple Music, and local files, with per source last track memory in the dual wells
+- A landscape personal player body that runs full screen with the system bars hidden, haptic piano keys that travel, and hold to wind on FF and REW where the session offers seeking
 - Real transport everywhere; seek, shuffle, and repeat appear only where the playing app's session actually offers them
 - An EQ button that opens your own system wide equalizer app (chosen once, remembered; long press to change). Ferric does not pretend to equalize another app's audio
 - Bluetooth and headset controls relayed through Ferric's own media session, so the buttons reach the live deck from either library, and the lock screen shows one consistent controller

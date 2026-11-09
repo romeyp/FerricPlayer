@@ -19,8 +19,8 @@ val signingProps = Properties().apply {
 }
 
 // The app version; versionCode must go up by one with every release.
-val appVersionName = "1.8.0"
-val appVersionCode = 21
+val appVersionName = "1.9.7"
+val appVersionCode = 29
 
 base {
     archivesName = "FerricPlayer-$appVersionName"

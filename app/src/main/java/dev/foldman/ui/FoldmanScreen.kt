@@ -169,7 +169,10 @@ fun FoldmanScreen(
                 maxWidth >= 600.dp && maxWidth > maxHeight * 0.7f -> Posture.Unfolded
                 else -> Posture.Cover
             }
-            LaunchedEffect(posture) { view.showSystemBars(posture != Posture.Cover) }
+            // The bars show only over the cover deck; every other deck is full screen.
+            // The sheet states are keys too, so a sheet opening and closing over a full
+            // screen deck re-asserts the hidden state its window may have disturbed.
+            LaunchedEffect(posture, shelfOpen, settingsOpen) { view.showSystemBars(posture != Posture.Cover) }
             when {
                 expanded -> ExpandedDeck(
                     ui, anim, deck,
@@ -189,7 +192,6 @@ fun FoldmanScreen(
                             ui, anim, deck,
                             onTapes = { shelfOpen = true; settingsOpen = false },
                             onSettings = { settingsOpen = true; shelfOpen = false },
-                            onExpand = { expanded = true },
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
@@ -211,7 +213,6 @@ fun FoldmanScreen(
                             ui, anim, deck,
                             onTapes = { shelfOpen = true; settingsOpen = false },
                             onSettings = { settingsOpen = true; shelfOpen = false },
-                            onExpand = { expanded = true },
                             modifier = Modifier.height(topH).fillMaxWidth(),
                             tabletop = true,
                         )
@@ -342,7 +343,7 @@ private fun CoverSettingsSheet(ui: DeckUi, vm: DeckViewModel, modifier: Modifier
 }
 
 /** Hides the status and navigation bars (a swipe from the edge brings them back briefly), or restores them. */
-private fun android.view.View.showSystemBars(show: Boolean) {
+internal fun android.view.View.showSystemBars(show: Boolean) {
     var ctx = context
     while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) ctx = ctx.baseContext
     val window = (ctx as? android.app.Activity)?.window ?: return
@@ -357,7 +358,7 @@ private fun android.view.View.showSystemBars(show: Boolean) {
 }
 
 /** Key actions, bundled so the layouts don't each need the view model. */
-private class DeckControls(vm: DeckViewModel) {
+class DeckControls(vm: DeckViewModel) {
     val play = vm::play
     val pause = vm::pauseKey
     val stop = vm::stop
@@ -369,6 +370,8 @@ private class DeckControls(vm: DeckViewModel) {
     val shuffle = vm::toggleShuffle
     val repeat = vm::cycleRepeat
     val seek = vm::seekToFraction
+    val sleep = vm::cycleSleepTimer
+    val cancelSleep = vm::cancelSleepTimer
 }
 
 private val Serif = TextStyle(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Black, color = Color(0xFFF1F3F6), letterSpacing = 2.sp)
@@ -526,179 +529,6 @@ private fun ExpandedDeck(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(end = 10.dp, bottom = 10.dp),
             diameter = 40.dp,
-        )
-    }
-}
-
-/**
- * The landscape deck: a slim personal player at hand scale, not a picture of one. The plate
- * is the whole window: the dark brushed body runs edge to edge with no page background
- * framing it, and the safe drawing insets land inside the plate as furniture padding.
- * Furniture is kept slim so the tape gets the room: a 16 dp engraved wordmark strip, the
- * 2 dp orange line over the fixed 54 dp key rail, one 20 dp info row, and the 3 dp progress
- * hairline at the plate's bottom edge. The window well is a shallow recess that hugs the
- * cassette, the tape plus about 6 dp of well wall on every side, centered in the plate;
- * the cassette starts from a fit by whichever of the well zone's width or height binds
- * first, grows by a tenth into the plate's breathing room, and is clamped to leave at
- * least 16 dp of zone on the binding axis, always at its true aspect and never cropped,
- * and the textured plate body shows around the well instead of a black letterbox void.
- * The rail carries the portrait deck's furniture in
- * player order: utilities, transport, the control strip trio, volume, and the expand key
- * at the far right.
- */
-@Composable
-private fun LandscapeDeck(
-    ui: DeckUi,
-    anim: DeckAnimations,
-    deck: DeckControls,
-    onTapes: () -> Unit,
-    onSettings: () -> Unit,
-    onExpand: () -> Unit,
-    modifier: Modifier,
-    tabletop: Boolean = false,
-) {
-    val playing = ui.transport == Transport.PLAYING
-    // While a scrub drag is live on the bottom hairline, the info row's elapsed time
-    // shows where the finger is headed instead of where the tape is.
-    var scrubTargetMs by remember { mutableStateOf<Long?>(null) }
-    val insetModifier = if (tabletop) {
-        Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-    } else {
-        Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
-    }
-    Column(
-        modifier
-            .darkBrushed()
-            .then(insetModifier),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(16.dp).padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Wordmark("FERRIC PLAYER", 11.sp)
-        }
-        BoxWithConstraints(
-            Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(horizontal = 10.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            // Jerome's 1.3.2 adjustment: the tape runs about a tenth bigger than the
-            // plain fit, eating into the plate's breathing room around the well. Start
-            // from the 1.3.1 fit (zone minus the old 10 dp margin on every side), scale
-            // it by 1.10, then clamp so the cassette always leaves at least 16 dp of
-            // zone on whichever axis binds, at true aspect and never cropped. The well
-            // margin drops to 6 dp so more of the gain is tape, not wall.
-            val wellMargin = 6.dp
-            val fittedWidth = minOf(
-                maxWidth - 20.dp,
-                (maxHeight - 20.dp) * (100.4f / 63.8f),
-            )
-            val cassetteWidth = minOf(
-                fittedWidth * 1.10f,
-                maxWidth - 16.dp,
-                (maxHeight - 16.dp) * (100.4f / 63.8f),
-            )
-            val cassetteHeight = cassetteWidth * (63.8f / 100.4f)
-            Box(
-                Modifier
-                    .size(cassetteWidth + wellMargin * 2, cassetteHeight + wellMargin * 2)
-                    .recess(corner = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                FullCassetteFace(ui, anim, Modifier.width(cassetteWidth))
-            }
-        }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(2.dp)
-                .background(DeckColors.Accent.copy(alpha = 0.8f)),
-        )
-        Row(
-            Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RoundTransportButton("Settings", onSettings, roundSymbol = RoundSymbol.GEAR, diameter = 44.dp)
-            Spacer(Modifier.width(8.dp))
-            RoundTransportButton("Tapes and queue", onTapes, roundSymbol = RoundSymbol.LIST, diameter = 44.dp)
-            Spacer(Modifier.width(10.dp))
-            RoundTransportButton("Previous", deck.previous, symbol = KeySymbol.PREV, diameter = 48.dp, enabled = ui.hasPrevious)
-            Spacer(Modifier.width(8.dp))
-            RoundTransportButton(
-                if (playing) "Pause" else "Play",
-                if (playing) deck.pause else deck.play,
-                symbol = if (playing) KeySymbol.PAUSE else KeySymbol.PLAY,
-                diameter = 52.dp, ring = true, active = playing,
-            )
-            Spacer(Modifier.width(8.dp))
-            RoundTransportButton("Next", deck.next, symbol = KeySymbol.NEXT, diameter = 48.dp, enabled = ui.hasNext)
-            Spacer(Modifier.width(14.dp))
-            EqualizerButton()
-            Spacer(Modifier.width(8.dp))
-            DeckStripButton(
-                description = "Shuffle",
-                onPress = deck.shuffle,
-                symbol = StripSymbol.SHUFFLE,
-                lit = ui.shuffleOn,
-                enabled = ui.canShuffle,
-                stateText = if (ui.shuffleOn) "On" else "Off",
-            )
-            Spacer(Modifier.width(8.dp))
-            DeckStripButton(
-                description = "Repeat",
-                onPress = deck.repeat,
-                symbol = if (ui.repeatMode == RepeatMode.ONE) StripSymbol.REPEAT_ONE else StripSymbol.REPEAT,
-                lit = ui.repeatMode != RepeatMode.NONE,
-                enabled = ui.canRepeat,
-                stateText = when (ui.repeatMode) {
-                    RepeatMode.NONE -> "Off"
-                    RepeatMode.ALL -> "All"
-                    RepeatMode.ONE -> "One"
-                },
-            )
-            Spacer(Modifier.width(12.dp))
-            VolumeSliderHorizontal(ui.volume, deck.volume, Modifier.weight(1f).height(48.dp))
-            Spacer(Modifier.width(8.dp))
-            ExpandToggleButton(expanded = false, onPress = onExpand, diameter = 38.dp)
-        }
-        Row(
-            Modifier.fillMaxWidth().height(20.dp).padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val headline = buildString {
-                append(ui.title.ifBlank { "NO TAPE" })
-                if (ui.artist.isNotBlank()) append(" · ").append(ui.artist)
-            }
-            Text(
-                headline,
-                style = TextStyle(color = Color(0xFFF4EFE9), fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(16.dp))
-            Text(
-                "${formatTime(scrubTargetMs ?: ui.positionMs)} / ${formatTime(ui.durationMs)}",
-                style = TextStyle(color = Color(0xFFA79C92), fontSize = 11.sp),
-                maxLines = 1,
-            )
-        }
-        // The progress hairline at the plate's bottom edge: the shared scrubber with its
-        // bar pinned to the bottom of a 20 dp invisible touch target, so the line still
-        // sits flush on the edge while a finger can actually land on it.
-        SeekScrubber(
-            progress = ui.progress,
-            canSeek = ui.canSeek,
-            durationMs = ui.durationMs,
-            onSeek = deck.seek,
-            modifier = Modifier.fillMaxWidth(),
-            barHeight = 3.dp,
-            touchHeight = 20.dp,
-            corner = 0.dp,
-            barAlignment = Alignment.BottomCenter,
-            onDragTimeChange = { scrubTargetMs = it },
         )
     }
 }

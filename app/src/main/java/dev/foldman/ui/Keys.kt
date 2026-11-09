@@ -4,6 +4,7 @@ import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.PressGestureScope
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,16 +52,59 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.foldman.deck.DeckUi
 import dev.foldman.deck.Transport
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
 enum class KeySymbol { STOP, REW, PLAY, FF, PAUSE, PREV, NEXT }
+
+private const val HOLD_TO_WIND_MS = 350L
+private const val WIND_STEP_MS = 220L
+private const val WIND_FIRST_STEP_MS = 10_000L
+private const val WIND_STEP_GROWTH_MS = 4_000L
+private const val WIND_MAX_STEP_MS = 30_000L
+
+/**
+ * Waits out a press on a wind key and reports whether it became a hold. A release
+ * inside [HOLD_TO_WIND_MS] is a plain tap and returns false, so the caller fires its
+ * tap action. A longer hold returns true and the tap action stays unfired: on a
+ * source that can seek, the hold also steps the tape by growing steps (ten seconds
+ * at first, up to thirty) every [WIND_STEP_MS] until the release; on a source that
+ * cannot seek, the hold does nothing at all beyond the key's own travel. The steps
+ * go through the caller's seek, which re-checks seek support and the live position,
+ * so a hold can never fake a wind: nothing moves that the session did not move.
+ */
+private suspend fun PressGestureScope.holdToWind(
+    scope: CoroutineScope,
+    direction: Int,
+    canWind: () -> Boolean,
+    onWindStep: (Long) -> Unit,
+): Boolean {
+    var held = false
+    val job = scope.launch {
+        delay(HOLD_TO_WIND_MS)
+        held = true
+        if (!canWind()) return@launch
+        var step = WIND_FIRST_STEP_MS
+        while (true) {
+            onWindStep(direction * step)
+            step = (step + WIND_STEP_GROWTH_MS).coerceAtMost(WIND_MAX_STEP_MS)
+            delay(WIND_STEP_MS)
+        }
+    }
+    tryAwaitRelease()
+    job.cancel()
+    return held
+}
 
 /**
  * The transport keys. Latched keys stay down, exactly as the mechanism would hold them. [vertical]
@@ -76,17 +121,36 @@ fun TransportKeys(
     modifier: Modifier = Modifier,
     keyHeight: Dp = 86.dp,
     vertical: Boolean = false,
+    onSeek: ((Float) -> Unit)? = null,
 ) {
     val t = ui.transport
     // Captions sit on the silver strip when stacked, on the dark key well otherwise.
     val cc = if (vertical) DeckColors.Engrave else Color(0xFF9EA1A7)
+    // Hold-to-wind steps, computed from the live position at the moment each step
+    // fires and clamped to the track; the seek itself re-checks seek support.
+    val posNow by rememberUpdatedState(ui.positionMs)
+    val durNow by rememberUpdatedState(ui.durationMs)
+    val seekNow by rememberUpdatedState(onSeek)
+    val windStep: (Long) -> Unit = { delta ->
+        val seek = seekNow
+        val duration = durNow
+        if (seek != null && duration > 0) {
+            seek(((posNow + delta).coerceIn(0L, duration)).toFloat() / duration.toFloat())
+        }
+    }
     val keys: @Composable (Modifier, Modifier) -> Unit = { k, play ->
-        DeckKey(KeySymbol.REW, "REW", latched = t == Transport.REWINDING, onPress = onRewind, modifier = k, height = keyHeight, captionColor = cc)
+        DeckKey(
+            KeySymbol.REW, "REW", latched = t == Transport.REWINDING, onPress = onRewind, modifier = k, height = keyHeight, captionColor = cc,
+            windDirection = -1, canWind = ui.canSeek && onSeek != null, onWindStep = if (onSeek != null) windStep else null,
+        )
         DeckKey(
             KeySymbol.PLAY, "PLAY", latched = t == Transport.PLAYING || t == Transport.PAUSED, onPress = onPlay,
             modifier = play, height = keyHeight, captionColor = cc, accent = true,
         )
-        DeckKey(KeySymbol.FF, "FF", latched = t == Transport.FAST_FORWARDING, onPress = onFastForward, modifier = k, height = keyHeight, captionColor = cc)
+        DeckKey(
+            KeySymbol.FF, "FF", latched = t == Transport.FAST_FORWARDING, onPress = onFastForward, modifier = k, height = keyHeight, captionColor = cc,
+            windDirection = 1, canWind = ui.canSeek && onSeek != null, onWindStep = if (onSeek != null) windStep else null,
+        )
         DeckKey(KeySymbol.PAUSE, "PAUSE", latched = t == Transport.PAUSED, onPress = onPause, modifier = k, height = keyHeight, captionColor = cc, mark = Color(0xFF3E9C5A))
         DeckKey(KeySymbol.STOP, "STOP·EJECT", latched = false, onPress = onStop, modifier = k, height = keyHeight, captionColor = cc, mark = Color(0xFFC8352B))
     }
@@ -115,6 +179,9 @@ fun DeckKey(
     accent: Boolean = false,
     mark: Color? = null,
     captionColor: Color = Color(0xFF9EA1A7),
+    windDirection: Int = 0,
+    canWind: Boolean = false,
+    onWindStep: ((Long) -> Unit)? = null,
 ) {
     var pressed by remember { mutableStateOf(false) }
     val view = LocalView.current
@@ -122,6 +189,9 @@ fun DeckKey(
     val haptics = LocalHaptics.current
     // The gesture loop outlives recompositions; it calls whatever the latest action is.
     val action by rememberUpdatedState(onPress)
+    val windCan by rememberUpdatedState(canWind)
+    val windAction by rememberUpdatedState(onWindStep)
+    val scope = rememberCoroutineScope()
     val depth by animateFloatAsState(
         when {
             pressed -> 1f
@@ -150,8 +220,17 @@ fun DeckKey(
                         pressed = true
                         if (haptics) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_PRESS)
                         sounds?.keyDown()
-                        action()
-                        tryAwaitRelease()
+                        val step = windAction
+                        if (windDirection != 0 && step != null) {
+                            // A wind key: a quick tap still latches the mechanical
+                            // wind, fired on release; a hold past the beat steps
+                            // through the song instead (see holdToWind), and where
+                            // the source cannot seek the hold does nothing at all.
+                            if (!holdToWind(scope, windDirection, { windCan }, step)) action()
+                        } else {
+                            action()
+                            tryAwaitRelease()
+                        }
                         pressed = false
                         if (haptics) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_RELEASE)
                         sounds?.keyUp()
@@ -621,6 +700,282 @@ fun DeckStripButton(
             } else {
                 drawStripSymbol(symbol, cy, cap * 0.55f, ink)
             }
+        }
+    }
+}
+
+/**
+ * A piano key for the landscape player body: a wide dark key seated in the machine's
+ * bottom edge. It travels a few dp as it is pressed and the shadow in its slot
+ * collapses with it, and it ticks once on the way down, a single short tick through
+ * the standard haptic APIs, so the system's own haptic setting still governs. An
+ * accented key wears its orange line on its top edge, lit while it is latched. A wind
+ * key (REW or FF) also answers a hold: past a beat it steps through the song by
+ * growing steps while the source can seek, and its plain tap keeps the latching
+ * behaviour the deck's other wind keys have always had.
+ */
+@Composable
+fun BodyKey(
+    caption: String,
+    symbol: KeySymbol?,
+    onPress: () -> Unit,
+    modifier: Modifier = Modifier,
+    latched: Boolean = false,
+    accent: Boolean = false,
+    enabled: Boolean = true,
+    height: Dp = 52.dp,
+    windDirection: Int = 0,
+    canWind: Boolean = false,
+    onWindStep: ((Long) -> Unit)? = null,
+) {
+    var pressed by remember { mutableStateOf(false) }
+    val view = LocalView.current
+    val sounds = LocalMechSounds.current
+    val haptics = LocalHaptics.current
+    val action by rememberUpdatedState(onPress)
+    val windCan by rememberUpdatedState(canWind)
+    val windAction by rememberUpdatedState(onWindStep)
+    val scope = rememberCoroutineScope()
+    val depth by animateFloatAsState(
+        when {
+            pressed -> 1f
+            latched -> 0.6f
+            else -> 0f
+        },
+        spring(dampingRatio = 0.55f, stiffness = 2400f), label = "bodykey",
+    )
+    val measurer = rememberTextMeasurer()
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .height(height)
+            .semantics {
+                role = Role.Button
+                contentDescription = caption
+                stateDescription = if (latched) "Down" else "Up"
+            }
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectTapGestures(onPress = {
+                    pressed = true
+                    if (haptics) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_PRESS)
+                    sounds?.keyDown()
+                    val step = windAction
+                    if (windDirection != 0 && step != null) {
+                        if (!holdToWind(scope, windDirection, { windCan }, step)) action()
+                    } else {
+                        action()
+                        tryAwaitRelease()
+                    }
+                    pressed = false
+                    sounds?.keyUp()
+                })
+            },
+    ) {
+        val travel = 3.5.dp.toPx() * depth
+        val r = CornerRadius(4.dp.toPx())
+        val alpha = if (enabled) 1f else 0.4f
+        // The slot the key sinks into; its shadow shallows as the key fills it.
+        drawRoundRect(Color.Black.copy(alpha = (0.7f - 0.3f * depth) * alpha), cornerRadius = r)
+        val bodyTop = travel
+        val bodyH = size.height - 2.dp.toPx()
+        drawRoundRect(
+            Brush.verticalGradient(listOf(Color(0xFF33363B), Color(0xFF1D1E22), Color(0xFF26282D)), bodyTop, bodyTop + bodyH),
+            topLeft = Offset(0f, bodyTop), size = Size(size.width, bodyH), cornerRadius = r,
+        )
+        drawRoundRect(
+            Color.White.copy(alpha = 0.22f * alpha), topLeft = Offset(0f, bodyTop),
+            size = Size(size.width, bodyH), cornerRadius = r, style = Stroke(1f),
+        )
+        drawLine(
+            Color.White.copy(alpha = 0.14f * alpha),
+            Offset(r.x, bodyTop + 1f), Offset(size.width - r.x, bodyTop + 1f), 1f,
+        )
+        if (accent) {
+            drawRoundRect(
+                DeckColors.Accent.copy(alpha = (if (latched) 0.95f else 0.4f) * alpha),
+                topLeft = Offset(size.width * 0.22f, bodyTop + 2.5.dp.toPx()),
+                size = Size(size.width * 0.56f, 2.2.dp.toPx()),
+                cornerRadius = CornerRadius(1.dp.toPx()),
+            )
+        }
+        val ink = when {
+            !enabled -> Color(0xFF6E7176)
+            accent && latched -> DeckColors.Accent
+            else -> Color(0xFFD8DBE0)
+        }
+        symbol?.let {
+            drawSymbol(it, Offset(size.width / 2f, bodyTop + bodyH * 0.38f), size.minDimension * 0.17f, ink)
+        }
+        val cap = measurer.measure(
+            caption,
+            TextStyle(
+                fontSize = 6.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp,
+                color = if (enabled) Color(0xFF9BA0A6) else Color(0xFF5A5D62),
+            ),
+        )
+        drawText(
+            cap,
+            topLeft = Offset(size.width / 2f - cap.size.width / 2f, bodyTop + bodyH * 0.64f),
+        )
+    }
+}
+
+/** Glyphs for the rectangular pod keys on the landscape body, in the mockup's podkey style. */
+enum class PodGlyph { EQ, SHUFFLE, REPEAT, REPEAT_ONE, LIST, GEAR, MOON }
+
+/** Draws a pod glyph centred on [c]; EQ is lettering and is drawn by the key itself. */
+fun DrawScope.drawPodGlyph(glyph: PodGlyph, c: Offset, ink: Color) {
+    when (glyph) {
+        PodGlyph.SHUFFLE -> drawStripSymbol(StripSymbol.SHUFFLE, c, 7.dp.toPx(), ink)
+        PodGlyph.REPEAT -> drawStripSymbol(StripSymbol.REPEAT, c, 7.dp.toPx(), ink)
+        PodGlyph.REPEAT_ONE -> drawStripSymbol(StripSymbol.REPEAT_ONE, c, 7.dp.toPx(), ink)
+        PodGlyph.LIST -> drawRoundSymbol(RoundSymbol.LIST, c, 6.2.dp.toPx(), ink)
+        PodGlyph.GEAR -> drawRoundSymbol(RoundSymbol.GEAR, c, 6.2.dp.toPx(), ink)
+        PodGlyph.MOON -> drawRoundSymbol(RoundSymbol.MOON, c, 6.2.dp.toPx(), ink)
+        PodGlyph.EQ -> Unit
+    }
+}
+
+/**
+ * A rectangular pod key for the landscape player body, in the approved mockup's podkey
+ * style: a dark lozenge with its glyph on top, its name in micro caps under the glyph,
+ * and an optional state line (shuffle and repeat's state, the sleep countdown) under
+ * that. It travels a hair as it is pressed, with the same single haptic tick and
+ * mechanism sounds as the deck's other keys. A plain key fires on touch-down; a key
+ * with a long-press action (the EQ chooser, sleep cancel) waits for the release, so
+ * the two never fire together. A key the active source cannot honour is drawn dim
+ * and takes no taps, and a lit key wears the deck's orange in its glyph, its state
+ * line and a thin line along its top edge.
+ */
+@Composable
+fun PodRectKey(
+    description: String,
+    name: String,
+    glyph: PodGlyph,
+    onPress: () -> Unit,
+    modifier: Modifier = Modifier,
+    lit: Boolean = false,
+    enabled: Boolean = true,
+    stateText: String? = null,
+    stateLit: Boolean = false,
+    onLongPress: (() -> Unit)? = null,
+    longPressHint: String? = null,
+    height: Dp = 40.dp,
+) {
+    var pressed by remember { mutableStateOf(false) }
+    val view = LocalView.current
+    val sounds = LocalMechSounds.current
+    val haptics = LocalHaptics.current
+    val action by rememberUpdatedState(onPress)
+    val longAction by rememberUpdatedState(onLongPress)
+    val scope = rememberCoroutineScope()
+    val depth by animateFloatAsState(if (pressed) 1f else 0f, spring(stiffness = 3000f), label = "podrect")
+    val measurer = rememberTextMeasurer()
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .height(height)
+            .alpha(if (enabled) 1f else 0.35f)
+            .semantics {
+                role = Role.Button
+                contentDescription = if (longPressHint != null) "$description. $longPressHint" else description
+                stateText?.let { stateDescription = it }
+                if (onLongPress != null) {
+                    onLongClick(label = longPressHint ?: "Long press") { longAction?.invoke(); true }
+                }
+            }
+            .pointerInput(enabled, onLongPress != null) {
+                if (!enabled) return@pointerInput
+                if (onLongPress == null) {
+                    detectTapGestures(onPress = {
+                        pressed = true
+                        if (haptics) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_PRESS)
+                        sounds?.keyDown()
+                        action()
+                        tryAwaitRelease()
+                        pressed = false
+                        if (haptics) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_RELEASE)
+                        sounds?.keyUp()
+                    })
+                } else {
+                    detectTapGestures(onPress = {
+                        pressed = true
+                        if (haptics) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_PRESS)
+                        sounds?.keyDown()
+                        var firedLong = false
+                        val job = scope.launch {
+                            delay(450)
+                            firedLong = true
+                            longAction?.invoke()
+                            if (haptics) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        }
+                        val released = tryAwaitRelease()
+                        job.cancel()
+                        if (released && !firedLong) action()
+                        pressed = false
+                        if (haptics) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_RELEASE)
+                        sounds?.keyUp()
+                    })
+                }
+            },
+    ) {
+        val w = size.width
+        val h = size.height
+        val shift = 1.5.dp.toPx() * depth
+        val r = CornerRadius(6.dp.toPx())
+        val maxTextW = (w - 8.dp.toPx()).toInt().coerceAtLeast(1)
+        drawRoundRect(Color.Black.copy(alpha = 0.65f), topLeft = Offset(0f, 2f), size = Size(w, h), cornerRadius = r)
+        drawRoundRect(
+            Brush.verticalGradient(listOf(Color(0xFF33343A), Color(0xFF1F2024)), shift, h - 2f + shift),
+            topLeft = Offset(0f, shift), size = Size(w, h - 2f), cornerRadius = r,
+        )
+        drawRoundRect(
+            Color.White.copy(alpha = 0.16f), topLeft = Offset(0f, shift), size = Size(w, h - 2f),
+            cornerRadius = r, style = Stroke(1f),
+        )
+        if (lit) {
+            drawRoundRect(
+                DeckColors.Accent.copy(alpha = 0.9f),
+                topLeft = Offset(w * 0.18f, shift + 1.5.dp.toPx()),
+                size = Size(w * 0.64f, 2.dp.toPx()),
+                cornerRadius = CornerRadius(1.dp.toPx()),
+            )
+        }
+        val ink = if (lit) DeckColors.Accent else Color(0xFFD8DBE0)
+        val cy = h / 2f + shift - 1f
+        if (glyph == PodGlyph.EQ) {
+            val label = measurer.measure(
+                "EQ",
+                TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = ink),
+                maxLines = 1, constraints = Constraints(maxWidth = maxTextW),
+            )
+            drawText(label, topLeft = Offset(w / 2f - label.size.width / 2f, cy - h * 0.36f))
+        } else {
+            drawPodGlyph(glyph, Offset(w / 2f, cy - h * 0.18f), ink)
+        }
+        val nameLayout = measurer.measure(
+            name,
+            TextStyle(
+                fontSize = 6.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+                color = Color(0xFF9BA0A6),
+            ),
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            constraints = Constraints(maxWidth = maxTextW),
+        )
+        drawText(nameLayout, topLeft = Offset(w / 2f - nameLayout.size.width / 2f, cy + h * 0.10f))
+        if (stateText != null) {
+            val stateLayout = measurer.measure(
+                stateText,
+                TextStyle(
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontSize = 6.5.sp, fontWeight = FontWeight.Bold,
+                    color = if (stateLit) Color(0xFFFFB347) else Color(0xFF5D6066),
+                ),
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                constraints = Constraints(maxWidth = maxTextW),
+            )
+            drawText(stateLayout, topLeft = Offset(w / 2f - stateLayout.size.width / 2f, cy + h * 0.335f))
         }
     }
 }
